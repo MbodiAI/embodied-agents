@@ -61,6 +61,7 @@ from mbodied.agents.backends import OpenAIBackend
 from mbodied.types.message import Message
 from mbodied.types.sample import Sample
 from mbodied.types.sense.vision import Image
+from mbodied.types.tool import Tool, ToolCall
 
 SupportsOpenAI: TypeAlias = OpenAIBackend
 
@@ -345,10 +346,15 @@ class LanguageAgent(Agent):
 
         return message, memory
 
-    def postprocess_response(self, response: str, message: Message, memory: list[Message], **kwargs) -> str:
+    def postprocess_response(
+        self, response: str, message: Message, memory: list[Message], tool_calls: list[ToolCall] = None, **kwargs
+    ) -> str:
         """Postprocess the response."""
         self.context.append(message)
-        self.context.append(Message(role="assistant", content=response))
+        if response:
+            self.context.append(Message(role="assistant", content=response))
+        if tool_calls:
+            self.context.append(Message(role="assistant", content=tool_calls))
         return response
 
     def act(
@@ -357,6 +363,7 @@ class LanguageAgent(Agent):
         image: Image = None,
         context: list | str | Image | Message = None,
         model=None,
+        tools: List[Tool] = None,
         **kwargs,
     ) -> str:
         """Responds to the given instruction, image, and context.
@@ -369,6 +376,7 @@ class LanguageAgent(Agent):
             context: Additonal context to include in the response. If context is a list of messages, it will be interpreted
                 as new memory.
             model: The model to use for the response.
+            tools: The tools (function calls) to use.
             **kwargs: Additional keyword arguments.
 
         Returns:
@@ -383,8 +391,12 @@ class LanguageAgent(Agent):
         message, memory = self.prepare_inputs(instruction, image, context)
         kwargs = {**kwargs, "model": model}
         model = kwargs.pop("model", None) or self.actor.DEFAULT_MODEL
-        response = self.actor.predict(message, context=memory, model=model, **kwargs)
-        return self.postprocess_response(response, message, memory, **kwargs)
+        if tools:
+            response, tool_calls = self.actor.predict(message, context=memory, model=model, tools=tools, **kwargs)
+            return self.postprocess_response(response, message, memory, tool_calls, **kwargs), tool_calls
+        else:
+            response = self.actor.predict(message, context=memory, model=model, **kwargs)
+            return self.postprocess_response(response, message, memory, **kwargs)
 
     def act_and_stream(
         self, instruction: str, image: Image = None, context: list | str | Image | Message = None, model=None, **kwargs
@@ -428,6 +440,45 @@ async def async_main():
         print(resp)
 
 
+# if __name__ == "__main__":
+#     main()
+#     asyncio.run(async_main())
+
 if __name__ == "__main__":
-    main()
-    asyncio.run(async_main())
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_object_location",
+                "description": "Get the pose of the object with respect to the reference object (i.e. end_effector, camera, etc). It returns A tuple containing (x, y, z, roll, pitch, and yaw) values representing the object's pose.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "object_name": {
+                            "type": "string",
+                            "description": "The name of the object whose location is being queried.",
+                        },
+                        "reference": {
+                            "type": "string",
+                            "description": "The reference object for the pose, such as end_effector or camera.",
+                            "default": "end_effector",
+                        },
+                    },
+                    "required": ["object_name"],
+                },
+            },
+        },
+    ]
+    validated_tools = []
+    for tool in tools:
+        t = Tool.model_validate(tool)
+        validated_tools.append(t)
+
+    print(validated_tools)
+    agent = LanguageAgent()
+    response, tcs = agent.act(
+        "Look for the apple and orange with respect to the camera.", tools=validated_tools
+    )
+    print(response)
+    print(tcs)
+    print(agent.history())

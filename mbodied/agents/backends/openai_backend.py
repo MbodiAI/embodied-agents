@@ -25,6 +25,7 @@ from mbodied.agents.backends.backend import Backend
 from mbodied.agents.backends.serializer import Serializer
 from mbodied.types.message import Message
 from mbodied.types.sense.vision import Image
+from mbodied.types.tool import Tool, ToolCall
 
 ERRORS = (
     OpenAIRateLimitError,
@@ -119,7 +120,12 @@ class OpenAIBackendMixin(Backend):
         on_backoff=lambda details: print(f"Backing off {details['wait']:.1f} seconds after {details['tries']} tries."),  # noqa
     )
     def predict(
-        self, message: Message, context: List[Message] | None = None, model: Any | None = None, **kwargs
+        self,
+        message: Message,
+        context: List[Message] | None = None,
+        model: Any | None = None,
+        tools: List[Tool] | None = None,
+        **kwargs,
     ) -> str:
         """Create a completion based on the given message and context.
 
@@ -141,8 +147,15 @@ class OpenAIBackendMixin(Backend):
             messages=serialized_messages,
             temperature=0,
             max_tokens=1000,
+            tools=tools,
             **kwargs,
         )
+        if tools:
+            tool_calls = []
+            for tool_call in completion.choices[0].message.tool_calls:
+                tool_calls.append(ToolCall.model_validate(tool_call))
+            return completion.choices[0].message.content, tool_calls
+
         return completion.choices[0].message.content
 
     def stream(self, message: Message, context: List[Message] = None, model: str = "gpt-4o", **kwargs):
