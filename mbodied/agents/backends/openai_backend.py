@@ -152,8 +152,9 @@ class OpenAIBackendMixin(Backend):
         )
         if tools:
             tool_calls = []
-            for tool_call in completion.choices[0].message.tool_calls:
-                tool_calls.append(ToolCall.model_validate(tool_call))
+            if completion.choices[0].message.tool_calls:
+                for tool_call in completion.choices[0].message.tool_calls:
+                    tool_calls.append(ToolCall.model_validate(tool_call))
             return completion.choices[0].message.content, tool_calls
 
         return completion.choices[0].message.content
