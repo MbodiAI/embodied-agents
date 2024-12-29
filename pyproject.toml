@@ -24,6 +24,7 @@ dependencies = [
   "anthropic",
   "art",
   "backoff",
+  "chromadb",
   "datasets",
   "gymnasium",
   "h5py",
